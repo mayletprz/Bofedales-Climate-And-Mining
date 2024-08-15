@@ -1,0 +1,91 @@
+﻿// Code used to generate climate data for each ecoregion (temperature and precipitation)
+
+
+// Load the shapefile from your assets
+var Region = ee.FeatureCollection('projects/mayleep/assets/Xerophytic_Puna_Bof');
+
+
+// Function to simplify the geometry of each feature in the collection
+var simplifyFeature = function(feature) {
+  return feature.simplify(1000); // Adjust the tolerance value as needed
+};
+
+
+// Apply the simplification to each feature
+var simplifiedRegion = Region.map(simplifyFeature);
+
+
+// Display the simplified shapefile on the map
+Map.addLayer(simplifiedRegion, {}, 'Region');
+Map.centerObject(simplifiedRegion);
+
+
+// Define time range
+var startDate = '1986-01-01';
+var endDate = '2021-01-01';
+
+
+// Load ERA5 monthly data for temperature
+var era5Temp = ee.ImageCollection('ECMWF/ERA5/MONTHLY')
+  .filterDate(startDate, endDate)
+  .filterBounds(simplifiedRegion)
+  .select('mean_2m_air_temperature');
+
+
+// Convert temperature from Kelvin to Celsius
+era5Temp = era5Temp.map(function(image) {
+  return image.subtract(273.15).copyProperties(image, ['system:time_start']);
+});
+
+
+// Create a time series chart for monthly mean temperature
+var tempChart = ui.Chart.image.series({
+  imageCollection: era5Temp,
+  region: simplifiedRegion,
+  reducer: ee.Reducer.mean(),
+  scale: 10000,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Monthly Mean Temperature Time Series (1986-2020)',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'Temperature (°C)'},
+  lineWidth: 1,
+  pointSize: 3,
+});
+
+
+// Print the temperature chart
+print(tempChart);
+
+
+// Load ERA5 monthly data for precipitation
+var era5Precip = ee.ImageCollection('ECMWF/ERA5/MONTHLY')
+  .filterDate(startDate, endDate)
+  .filterBounds(simplifiedRegion)
+  .select('total_precipitation');
+
+
+// Convert precipitation from meters to millimeters
+era5Precip = era5Precip.map(function(image) {
+  return image.multiply(1000).copyProperties(image, ['system:time_start']);
+});
+
+
+// Create a time series chart for monthly total precipitation
+var precipChart = ui.Chart.image.series({
+  imageCollection: era5Precip,
+  region: simplifiedRegion,
+  reducer: ee.Reducer.mean(),
+  scale: 10000,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Monthly Total Precipitation Time Series (1986-2020)',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'Precipitation (mm)'},
+  lineWidth: 1,
+  pointSize: 3,
+});
+
+
+// Print the precipitation chart
+print(precipChart);

@@ -1,0 +1,149 @@
+﻿//Code used to create NDVI datasets for bofedales in all regions, including mining areas.
+// Simplification value, StartDate and EndDate changed in one or two year intervals (depending on the size of the shapefile)
+
+
+
+
+
+
+// Load the shapefile from your assets
+var Region = ee.FeatureCollection('projects/mayleep/assets/xero_excluding_mines');
+
+
+// Function to simplify the geometry of each feature in the collection
+var simplifyFeature = function(feature) {
+    return feature.simplify(1700);
+};
+
+
+// Apply the simplification to each feature
+var simplified_Region = Region.map(simplifyFeature);
+
+
+// Function to mask clouds using the 'QA_PIXEL' band for Landsat 8
+var maskL8sr = function(image) {
+    var qa = image.select('QA_PIXEL');
+    var cloud_mask = qa.bitwiseAnd(1 << 3).eq(0).and(qa.bitwiseAnd(1 << 5).eq(0));
+    return image.updateMask(cloud_mask);
+};
+
+
+// Function to mask clouds using the 'QA_PIXEL' band for Landsat 7
+var maskL7sr = function(image) {
+    var qa = image.select('QA_PIXEL');
+    var cloud_mask = qa.bitwiseAnd(1 << 3).eq(0).and(qa.bitwiseAnd(1 << 5).eq(0));
+    return image.updateMask(cloud_mask);
+};
+
+
+// Function to mask clouds using the 'QA_PIXEL' band for Landsat 5
+var maskL5sr = function(image) {
+    var qa = image.select('QA_PIXEL');
+    var cloud_mask = qa.bitwiseAnd(1 << 3).eq(0).and(qa.bitwiseAnd(1 << 5).eq(0));
+    return image.updateMask(cloud_mask);
+};
+
+
+// Function to add NDVI band to Landsat 5 images
+var addNDVI_L5 = function(image) {
+    var ndvi = image.normalizedDifference(['SR_B4', 'SR_B3']).rename('NDVI');
+    return image.addBands(ndvi);
+};
+
+
+// Function to add NDVI band to Landsat 7 images
+var addNDVI_L7 = function(image) {
+    var ndvi = image.normalizedDifference(['SR_B4', 'SR_B3']).rename('NDVI');
+    return image.addBands(ndvi);
+};
+
+
+// Function to add NDVI band to Landsat 8 images
+var addNDVI_L8 = function(image) {
+    var ndvi = image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI');
+    return image.addBands(ndvi);
+};
+
+
+// Define date ranges based on available data for each Landsat mission
+var startDate = '2023-01-01';
+var endDate = '2023-12-31';
+
+
+// Combine Landsat 5, 7, and 8 collections
+var collectionL5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2')
+    .filterDate(startDate, endDate)
+    .filterBounds(simplified_Region)
+    .filter(ee.Filter.lt('CLOUD_COVER', 20))
+    .map(maskL5sr)
+    .map(addNDVI_L5);
+
+
+var collectionL7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
+    .filterDate(startDate, endDate)
+    .filterBounds(simplified_Region)
+    .filter(ee.Filter.lt('CLOUD_COVER', 20))
+    .map(maskL7sr)
+    .map(addNDVI_L7);
+
+
+var collectionL8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+    .filterDate(startDate, endDate)
+    .filterBounds(simplified_Region)
+    .filter(ee.Filter.lt('CLOUD_COVER', 20))
+    .map(maskL8sr)
+    .map(addNDVI_L8);
+
+
+// Merge collections
+var collection = collectionL5.merge(collectionL7).merge(collectionL8);
+
+
+// Reduce the region: calculate mean NDVI for each image
+var reduceRegion = function(image) {
+    var mean = image.reduceRegion({
+        reducer: ee.Reducer.mean(),
+        geometry: simplified_Region,
+        scale: 30,
+        maxPixels: 1e9
+    });
+    var ndvi_value = mean.get('NDVI');
+    return ee.Feature(null, {
+        'mean': ee.Algorithms.If(ndvi_value, ndvi_value, null),
+        'date': image.date().format('YYYY-MM-dd')  // Change date format here
+    });
+};
+
+
+// Apply the reduction to each image in the collection
+var time_series = collection.map(reduceRegion);
+
+
+// Extract mean NDVI values into a list
+var meanNDVIList = time_series.aggregate_array('mean');
+
+
+// Compute mean and standard deviation of the NDVI values
+var meanNDVI = meanNDVIList.reduce(ee.Reducer.mean());
+var sdNDVI = meanNDVIList.reduce(ee.Reducer.stdDev());
+
+
+// Print the overall mean and standard deviation
+print('The mean NDVI for bofedales with cloud filtered data is:', meanNDVI);
+print('The standard deviation of NDVI for bofedales with cloud filtered data is:', sdNDVI);
+
+
+// Extract data for plotting
+var chart = ui.Chart.feature.byFeature(time_series, 'date', 'mean')
+    .setChartType('LineChart')
+    .setOptions({
+        title: 'NDVI Time Series (StartDate-EndDate)',
+        vAxis: {title: 'Mean NDVI'},
+        hAxis: {title: 'Date'},
+        lineWidth: 1,
+        pointSize: 3
+    });
+
+
+// Print the chart
+print(chart);
